@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -288,6 +289,9 @@ function setCors(res: http.ServerResponse) {
   }
 }
 
+// Session store: maps session IDs to their transport + server
+const sessions = new Map<string, { transport: StreamableHTTPServerTransport }>();
+
 const httpServer = http.createServer(async (req, res) => {
   setCors(res);
 
@@ -299,12 +303,34 @@ const httpServer = http.createServer(async (req, res) => {
 
   if (req.url === "/mcp") {
     try {
+      const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
+      // Existing session — route to its transport
+      if (sessionId && sessions.has(sessionId)) {
+        const session = sessions.get(sessionId)!;
+        await session.transport.handleRequest(req, res);
+        return;
+      }
+
+      // New session — create server + transport with session support
       const server = createServer();
       const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
+        sessionIdGenerator: () => crypto.randomUUID(),
       });
+
+      transport.onclose = () => {
+        const sid = transport.sessionId;
+        if (sid) sessions.delete(sid);
+      };
+
       await server.connect(transport);
       await transport.handleRequest(req, res);
+
+      // Store the session after the init handshake assigns a session ID
+      const sid = transport.sessionId;
+      if (sid) {
+        sessions.set(sid, { transport });
+      }
     } catch (err) {
       console.error("MCP request error:", err);
       if (!res.headersSent) {
