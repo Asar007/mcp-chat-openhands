@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NavigateChat Diagram</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+    #diagram-frame {
+      width: 100%;
+      height: 100%;
+      border: none;
+      border-radius: 8px;
+    }
+    #loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      font-family: system-ui, -apple-system, sans-serif;
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading diagram...</div>
+  <iframe id="diagram-frame" style="display:none;" allowfullscreen></iframe>
+
+  <script>
+    let requestId = 0;
+
+    function sendMessage(msg) {
+      window.parent.postMessage(msg, "*");
+    }
+
+    function sendRequest(method, params) {
+      const id = ++requestId;
+      sendMessage({ jsonrpc: "2.0", id, method, params: params || {} });
+      return id;
+    }
+
+    function sendNotification(method, params) {
+      sendMessage({ jsonrpc: "2.0", method, params: params || {} });
+    }
+
+    function sendResponse(id, result) {
+      sendMessage({ jsonrpc: "2.0", id, result });
+    }
+
+    function extractLink(text) {
+      // Try JSON parse first
+      try {
+        const obj = JSON.parse(text);
+        if (obj.link) return obj.link;
+      } catch {}
+      // Fallback: extract from "link: https://..." line
+      const match = text.match(/link:\s*(https?:\/\/[^\s]+)/);
+      return match ? match[1] : null;
+    }
+
+    function showDiagram(url) {
+      const loading = document.getElementById("loading");
+      const frame = document.getElementById("diagram-frame");
+      loading.style.display = "none";
+      frame.src = url;
+      frame.style.display = "block";
+    }
+
+    window.addEventListener("message", (event) => {
+      const msg = event.data;
+      if (!msg || msg.jsonrpc !== "2.0") return;
+
+      // Initialize response
+      if (msg.id && msg.result && msg.result.protocolVersion) {
+        sendNotification("ui/notifications/initialized");
+        return;
+      }
+
+      // Tool result — extract link and show diagram
+      if (msg.method === "ui/notifications/tool-result") {
+        const result = msg.params;
+        const textContent = result?.content?.find(c => c.type === "text")?.text;
+        if (textContent) {
+          const link = extractLink(textContent);
+          if (link) showDiagram(link);
+        }
+        return;
+      }
+
+      // Ignore streaming partial input
+      if (msg.method === "ui/notifications/tool-input-partial") return;
+      if (msg.method === "ui/notifications/tool-input") return;
+
+      // Cancelled
+      if (msg.method === "ui/notifications/tool-cancelled") {
+        document.getElementById("loading").textContent = "Diagram cancelled.";
+        return;
+      }
+
+      // Theme changes
+      if (msg.method === "ui/notifications/host-context-changed") return;
+
+      // Teardown
+      if (msg.method === "ui/resource-teardown") {
+        sendResponse(msg.id, {});
+        return;
+      }
+    });
+
+    // Initiate handshake
+    sendRequest("ui/initialize", {
+      protocolVersion: "2025-03-26",
+      clientInfo: { name: "NavigateChat Diagram Viewer", version: "1.0.0" },
+      capabilities: {}
+    });
+  </script>
+</body>
+</html>

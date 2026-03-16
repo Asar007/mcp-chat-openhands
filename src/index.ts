@@ -1,12 +1,22 @@
 #!/usr/bin/env node
 import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import {
+  registerAppTool,
+  registerAppResource,
+  RESOURCE_MIME_TYPE,
+} from "@modelcontextprotocol/ext-apps/server";
 import * as z from "zod/v4";
 import { buildMindMapPrompt } from "./prompt.js";
 
 const API_BASE_URL =
   process.env.API_BASE_URL || "https://api.navigatechat.com";
+
+const DIST_DIR = path.join(import.meta.dirname, ".");
+const DIAGRAM_RESOURCE_URI = "ui://chat-visualizer/diagram.html";
 
 function createServer(): McpServer {
   const server = new McpServer({
@@ -36,19 +46,23 @@ function createServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerAppTool(
+    server,
     "create_public_diagram",
     {
       title: "Create Public Diagram",
       description:
         "Create a publicly shareable diagram link. Takes diagram JSON content (a NavigateChat mindmap/graph/sequence object) and returns a public URL that anyone can view without authentication.",
-      inputSchema: z.object({
+      inputSchema: {
         json_content: z
           .union([z.string(), z.record(z.string(), z.any())])
           .describe(
             "The diagram JSON content — either a JSON string or an object with metadata, nodes, and edges"
           ),
-      }),
+      },
+      _meta: {
+        ui: { resourceUri: DIAGRAM_RESOURCE_URI },
+      },
     },
     async ({ json_content }) => {
       const body =
@@ -99,13 +113,14 @@ function createServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerAppTool(
+    server,
     "update_public_diagram",
     {
       title: "Update Public Diagram",
       description:
         "Update an existing public diagram's content at the same shareable link. Use this when a user wants to modify a previously created diagram — the URL stays the same and the TTL is extended.",
-      inputSchema: z.object({
+      inputSchema: {
         public_id: z
           .string()
           .describe(
@@ -116,7 +131,10 @@ function createServer(): McpServer {
           .describe(
             "The updated diagram JSON content — either a JSON string or an object with metadata, nodes, and edges"
           ),
-      }),
+      },
+      _meta: {
+        ui: { resourceUri: DIAGRAM_RESOURCE_URI },
+      },
     },
     async ({ public_id, json_content }) => {
       const body =
@@ -210,6 +228,35 @@ function createServer(): McpServer {
           {
             type: "text" as const,
             text: JSON.stringify(data, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  registerAppResource(
+    server,
+    DIAGRAM_RESOURCE_URI,
+    DIAGRAM_RESOURCE_URI,
+    { mimeType: RESOURCE_MIME_TYPE },
+    async () => {
+      const html = await fs.readFile(
+        path.join(DIST_DIR, "widget.html"),
+        "utf-8"
+      );
+      return {
+        contents: [
+          {
+            uri: DIAGRAM_RESOURCE_URI,
+            mimeType: RESOURCE_MIME_TYPE,
+            text: html,
+            _meta: {
+              ui: {
+                csp: {
+                  frameDomains: ["https://www.navigatechat.com"],
+                },
+              },
+            },
           },
         ],
       };
