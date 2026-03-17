@@ -196,9 +196,22 @@ function showError(msg) {
   errorEl.style.display = "block";
 }
 
+function dbg(msg) {
+  var d = document.getElementById("error");
+  d.style.display = "block";
+  d.style.color = "#4f8ff7";
+  d.textContent = (d.textContent ? d.textContent + " | " : "") + msg;
+}
+
 var app = new App({ name: "NavigateChat Mind Map", version: "1.0.0" });
 
+dbg("SDK loaded");
+
+app.ontoolinputpartial = function() { dbg("partial"); };
+app.ontoolinput = function(params) { dbg("input:" + (params && params.arguments ? Object.keys(params.arguments).join(",") : "none")); };
+
 app.ontoolresult = function(result) {
+  dbg("result:" + (result ? "yes" : "no"));
   try {
     var textItem = result.content && result.content.find(function(c) { return c.type === "text"; });
     var text = textItem && textItem.text;
@@ -254,7 +267,7 @@ document.getElementById("btn-fs").onclick = function() {
   if (app.requestDisplayMode) app.requestDisplayMode({ mode: "fullscreen" });
 };
 
-app.connect();
+app.connect().then(function() { dbg("connected"); }).catch(function(e) { dbg("connect-err:" + e.message); });
 </script>
 </body>
 </html>`);
