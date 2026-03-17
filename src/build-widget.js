@@ -11,11 +11,11 @@ const html = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:transparent;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;color:#e0e0e0}
+html,body{width:100%;background:transparent;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;color:#e0e0e0}
 
 /* Container */
-#wrap{width:100%;height:100%;position:relative;overflow:hidden}
-#canvas{width:100%;height:100%;cursor:grab;overflow:hidden}
+#wrap{width:100%;min-height:200px;position:relative;overflow:hidden}
+#canvas{width:100%;min-height:200px;cursor:grab;overflow:hidden}
 #canvas:active{cursor:grabbing}
 #canvas svg{transform-origin:0 0}
 
@@ -325,7 +325,7 @@ function bindNodeEvents(){
       ev.stopPropagation();
       if((adjList[id]||[]).length>0){
         collapsed[id]=!collapsed[id];
-        redraw();fitView();
+        redraw();fitView();setTimeout(reportSize,100);
       }
     });
     el.addEventListener("mouseenter",function(ev){showTT(ev,id);});
@@ -335,6 +335,24 @@ function bindNodeEvents(){
 }
 
 // ========== INIT ==========
+function reportSize(){
+  try{
+    var svg=document.querySelector("#canvas svg");
+    if(!svg)return;
+    var svgH=parseFloat(svg.getAttribute("height"))||400;
+    var svgW=parseFloat(svg.getAttribute("width"))||600;
+    // Content height = SVG scaled + toolbar(~36px) + padding
+    var contentH=Math.max(300,Math.min(Math.round(svgH*scale)+50,800));
+    var contentW=Math.ceil(document.documentElement.scrollWidth);
+    // Resize the canvas to fit
+    var canvasEl=document.getElementById("canvas");
+    var wrapEl=document.getElementById("wrap");
+    canvasEl.style.height=contentH+"px";
+    wrapEl.style.height=(contentH+36)+"px";
+    sendNotif("ui/notifications/size-changed",{width:contentW,height:contentH+36});
+  }catch(e){}
+}
+
 function initDiagram(data){
   graphData=data;
   buildTree(data);
@@ -342,12 +360,11 @@ function initDiagram(data){
   document.getElementById("status").style.display="none";
   document.getElementById("tb").style.display="flex";
   redraw();
-  setTimeout(fitView,50);
-  // Tell host our size
-  try{
-    var el=document.documentElement;
-    sendNotif("ui/notifications/size-changed",{width:Math.ceil(el.scrollWidth),height:Math.max(400,Math.ceil(el.scrollHeight))});
-  }catch(e){}
+  setTimeout(function(){fitView();reportSize();},50);
+  // Re-report on resize
+  if(typeof ResizeObserver!=="undefined"){
+    new ResizeObserver(function(){reportSize();}).observe(document.getElementById("wrap"));
+  }
 }
 
 // ========== EVENT BINDINGS ==========
@@ -360,9 +377,9 @@ canvasEl.addEventListener("click",function(ev){if(ev.target===canvasEl||ev.targe
 
 document.getElementById("z-in").onclick=function(){var r=canvasEl.getBoundingClientRect();zoomBy(0.2,r.width/2,r.height/2);};
 document.getElementById("z-out").onclick=function(){var r=canvasEl.getBoundingClientRect();zoomBy(-0.2,r.width/2,r.height/2);};
-document.getElementById("z-fit").onclick=fitView;
-document.getElementById("z-linear").onclick=function(){currentLayout="linear";redraw();setTimeout(fitView,50);};
-document.getElementById("z-radial").onclick=function(){currentLayout="radial";redraw();setTimeout(fitView,50);};
+document.getElementById("z-fit").onclick=function(){fitView();setTimeout(reportSize,100);};
+document.getElementById("z-linear").onclick=function(){currentLayout="linear";redraw();setTimeout(function(){fitView();reportSize();},50);};
+document.getElementById("z-radial").onclick=function(){currentLayout="radial";redraw();setTimeout(function(){fitView();reportSize();},50);};
 document.getElementById("btn-open").onclick=function(){if(diagramLink)sendReq("ui/open-link",{url:diagramLink});};
 document.getElementById("btn-fs").onclick=function(){sendReq("ui/request-display-mode",{mode:"fullscreen"});};
 document.getElementById("det-close").onclick=hideDetails;
