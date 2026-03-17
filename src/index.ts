@@ -53,12 +53,12 @@ function createServer(): McpServer {
     {
       title: "Create Public Diagram",
       description:
-        "Create a publicly shareable diagram link. Takes diagram JSON content (a NavigateChat mindmap/graph/sequence object) and returns a public URL that anyone can view without authentication.",
+        "Create a publicly shareable diagram link. Takes diagram JSON content and returns a public URL. IMPORTANT: The json_content MUST follow this exact schema: { metadata: { topic, contentType: 'mindmap', nodeCount }, nodes: [{ id, data: { label, type: 'root'|'category'|'leaf', summary, hoverSummary } }], edges: [{ id, source, target, type: 'connects' }], hierarchy: { parentId: [childIds] } }. Every node MUST have label, summary, and hoverSummary in its data field. Use visualize_chat first to get proper schema guidance.",
       inputSchema: {
         json_content: z
           .union([z.string(), z.record(z.string(), z.any())])
           .describe(
-            "The diagram JSON content — either a JSON string or an object with metadata, nodes, and edges"
+            "The diagram JSON content with metadata, nodes (each with id, data.label, data.type, data.summary, data.hoverSummary), edges, and hierarchy"
           ),
       },
       _meta: {
