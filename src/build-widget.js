@@ -74,9 +74,12 @@ html[data-theme="light"] .tt .tt-label{color:#111}
       <div class="sep"></div>
       <button id="z-linear" title="Linear layout">☰ Linear</button>
       <button id="z-radial" title="Radial layout">◎ Radial</button>
+      <div class="sep"></div>
+      <button id="z-reset" title="Reset node positions">↺ Reset</button>
     </div>
     <div class="g">
-      <button id="btn-open">↗ Open in NavigateChat</button>
+      <button id="btn-theme" title="Toggle dark/light mode">◐ Theme</button>
+      <button id="btn-open">↗ Open</button>
       <button id="btn-fs">⛶</button>
     </div>
   </div>
@@ -102,6 +105,10 @@ var HS=280,VS=12,NH=38,RADIAL_BASE=280,RADIAL_INC=220;
 var graphData=null,nodeMap={},adjList={},parentMap={},positions={};
 var collapsed={},currentLayout="linear",diagramLink="",selectedId=null;
 var scale=1,panX=0,panY=0,isDragging=false,dragStartX=0,dragStartY=0,dragPanX=0,dragPanY=0;
+var nodeDragId=null,nodeDragStartX=0,nodeDragStartY=0,nodeDragOrigX=0,nodeDragOrigY=0;
+var darkMode=true;
+// Custom position overrides (set by dragging)
+var customPos={};
 
 // ========== LAYOUT: LINEAR ==========
 function stH(id){var c=(adjList[id]||[]).filter(function(x){return !collapsed[id];}); if(collapsed[id])c=[];else c=adjList[id]||[];if(!c.length)return NH;var t=0;c.forEach(function(ci){t+=stH(ci)+VS;});return t-VS;}
@@ -160,6 +167,13 @@ function calcLayout(){
   }else{
     layLinear(root.id,40,0,0);
   }
+  // Apply custom positions from drag overrides
+  Object.keys(customPos).forEach(function(id){
+    if(positions[id]){
+      positions[id].x=customPos[id].x;
+      positions[id].y=customPos[id].y;
+    }
+  });
 }
 
 // ========== RENDER SVG ==========
@@ -186,11 +200,12 @@ function renderSVG(){
     if(collapsed[parentMap[e.target]]&&parentMap[e.target]!==e.source)return;
     if(collapsed[e.source])return;
     var sn=nodeMap[e.source],sl=(sn&&sn.data&&sn.data.label)||e.source,sw=mW(sl,12);
+    var ec=darkMode?"rgba(128,128,128,0.2)":"rgba(0,0,0,0.12)";
     if(currentLayout==="radial"){
-      s+='<line x1="'+sp.x+'" y1="'+sp.y+'" x2="'+tp.x+'" y2="'+tp.y+'" stroke="rgba(128,128,128,0.15)" stroke-width="1.5"/>';
+      s+='<line x1="'+sp.x+'" y1="'+sp.y+'" x2="'+tp.x+'" y2="'+tp.y+'" stroke="'+ec+'" stroke-width="1.5"/>';
     }else{
       var sx=sp.x+sw,sy=sp.y,tx=tp.x,ty=tp.y,mx=sx+(tx-sx)*0.5;
-      s+='<path d="M'+sx+','+sy+' C'+mx+','+sy+' '+mx+','+ty+' '+tx+','+ty+'" fill="none" stroke="rgba(128,128,128,0.2)" stroke-width="1.5"/>';
+      s+='<path d="M'+sx+','+sy+' C'+mx+','+sy+' '+mx+','+ty+' '+tx+','+ty+'" fill="none" stroke="'+ec+'" stroke-width="1.5"/>';
     }
   });
 
@@ -212,19 +227,24 @@ function renderSVG(){
     }
 
     // Node box
+    var nodeFill=darkMode?"rgba(25,25,30,0.8)":"rgba(255,255,255,0.95)";
+    var textFill=darkMode?"#ddd":"#222";
+    var edgeClr=darkMode?"rgba(128,128,128,0.2)":"rgba(0,0,0,0.12)";
     s+='<rect x="'+rx+'" y="'+ry+'" width="'+w+'" height="'+NH+'" rx="8" ';
-    s+='fill="rgba(25,25,30,0.8)" stroke="'+clr+'" stroke-width="'+(tp==="root"?2.5:isSelected?2:1.5)+'" ';
+    s+='fill="'+nodeFill+'" stroke="'+clr+'" stroke-width="'+(tp==="root"?2.5:isSelected?2:1.5)+'" ';
     s+='style="transition:stroke-width 0.15s"/>';
 
     // Label
     s+='<text x="'+(rx+w/2)+'" y="'+(p.y+1)+'" text-anchor="middle" dominant-baseline="middle" ';
-    s+='font-size="'+(tp==="root"?13:11)+'" font-weight="'+(tp==="root"?"600":"400")+'" fill="#ddd">'+esc(lb)+'</text>';
+    s+='font-size="'+(tp==="root"?13:11)+'" font-weight="'+(tp==="root"?"600":"400")+'" fill="'+textFill+'">'+esc(lb)+'</text>';
 
     // Collapse indicator
     if((adjList[id]||[]).length>0){
       var ix=rx+w-2,iy=ry-2;
-      s+='<circle cx="'+ix+'" cy="'+iy+'" r="7" fill="rgba(25,25,30,0.9)" stroke="'+clr+'" stroke-width="1"/>';
-      s+='<text x="'+ix+'" y="'+(iy+1)+'" text-anchor="middle" dominant-baseline="middle" font-size="9" fill="#ccc">'+(isCollapsed?"+":"−")+'</text>';
+      var ciFill=darkMode?"rgba(25,25,30,0.9)":"rgba(255,255,255,0.95)";
+      var ciText=darkMode?"#ccc":"#444";
+      s+='<circle cx="'+ix+'" cy="'+iy+'" r="7" fill="'+ciFill+'" stroke="'+clr+'" stroke-width="1"/>';
+      s+='<text x="'+ix+'" y="'+(iy+1)+'" text-anchor="middle" dominant-baseline="middle" font-size="9" fill="'+ciText+'">'+(isCollapsed?"+":"−")+'</text>';
     }
 
     s+='</g>';
@@ -312,26 +332,126 @@ function redraw(){
   bindNodeEvents();
 }
 
+var nodeClickTimer=null,nodeWasDragged=false;
+
 function bindNodeEvents(){
   document.querySelectorAll(".nd").forEach(function(el){
     var id=el.getAttribute("data-id");
+
+    // Drag start
+    el.addEventListener("mousedown",function(ev){
+      ev.stopPropagation();
+      nodeDragId=id;
+      nodeWasDragged=false;
+      nodeDragStartX=ev.clientX;
+      nodeDragStartY=ev.clientY;
+      var p=positions[id];
+      if(p){nodeDragOrigX=p.x;nodeDragOrigY=p.y;}
+      el.style.cursor="grabbing";
+    });
+
     el.addEventListener("click",function(ev){
       ev.stopPropagation();
-      // Click on collapse indicator?
-      var bbox=el.getBoundingClientRect();
+      if(nodeWasDragged)return; // ignore click after drag
       showDetails(id);
     });
+
     el.addEventListener("dblclick",function(ev){
       ev.stopPropagation();
       if((adjList[id]||[]).length>0){
         collapsed[id]=!collapsed[id];
+        customPos={}; // reset custom positions on collapse
         redraw();fitView();setTimeout(reportSize,100);
       }
     });
-    el.addEventListener("mouseenter",function(ev){showTT(ev,id);});
-    el.addEventListener("mousemove",function(ev){ttEl.style.left=Math.min(ev.clientX+12,window.innerWidth-260)+"px";ttEl.style.top=(ev.clientY-10)+"px";});
+
+    el.addEventListener("mouseenter",function(ev){if(!nodeDragId)showTT(ev,id);});
+    el.addEventListener("mousemove",function(ev){if(!nodeDragId){ttEl.style.left=Math.min(ev.clientX+12,window.innerWidth-260)+"px";ttEl.style.top=(ev.clientY-10)+"px";}});
     el.addEventListener("mouseleave",hideTT);
   });
+}
+
+// Global mouse move for node dragging
+window.addEventListener("mousemove",function(ev){
+  if(nodeDragId){
+    var dx=(ev.clientX-nodeDragStartX)/scale;
+    var dy=(ev.clientY-nodeDragStartY)/scale;
+    if(Math.abs(dx)>3||Math.abs(dy)>3) nodeWasDragged=true;
+    var newX=nodeDragOrigX+dx;
+    var newY=nodeDragOrigY+dy;
+    customPos[nodeDragId]={x:newX,y:newY};
+    positions[nodeDragId].x=newX;
+    positions[nodeDragId].y=newY;
+    // Update SVG without full recalc
+    redrawFast();
+    hideTT();
+  }
+});
+window.addEventListener("mouseup",function(){
+  if(nodeDragId){
+    document.querySelectorAll(".nd").forEach(function(el){el.style.cursor="pointer";});
+    nodeDragId=null;
+  }
+});
+
+// Fast redraw: re-render SVG without recalculating layout
+function redrawFast(){
+  var svg=renderSVGFromPositions();
+  document.getElementById("canvas").innerHTML=svg;
+  applyTransform();
+  bindNodeEvents();
+}
+
+function renderSVGFromPositions(){
+  var ids=Object.keys(positions);if(!ids.length)return "";
+  var mnX=1e9,mxX=-1e9,mnY=1e9,mxY=-1e9;
+  ids.forEach(function(id){
+    var p=positions[id],n=nodeMap[id],lb=(n&&n.data&&n.data.label)||id,w=mW(lb,12);
+    mnX=Math.min(mnX,p.x-10);mxX=Math.max(mxX,p.x+w+10);
+    mnY=Math.min(mnY,p.y-NH/2-10);mxY=Math.max(mxY,p.y+NH/2+10);
+  });
+  var W=mxX-mnX+40,H=mxY-mnY+40,ox=-mnX+20,oy=-mnY+20;
+  var s='<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">';
+  s+='<g transform="translate('+ox+','+oy+')">';
+
+  (graphData.edges||[]).forEach(function(e){
+    var sp=positions[e.source],tp=positions[e.target];if(!sp||!tp)return;
+    if(collapsed[e.source])return;
+    var ec=darkMode?"rgba(128,128,128,0.2)":"rgba(0,0,0,0.12)";
+    var sn=nodeMap[e.source],sl=(sn&&sn.data&&sn.data.label)||e.source,sw=mW(sl,12);
+    if(currentLayout==="radial"){
+      s+='<line x1="'+sp.x+'" y1="'+sp.y+'" x2="'+tp.x+'" y2="'+tp.y+'" stroke="'+ec+'" stroke-width="1.5"/>';
+    }else{
+      var sx=sp.x+sw,sy=sp.y,tx=tp.x,ty=tp.y,mx=sx+(tx-sx)*0.5;
+      s+='<path d="M'+sx+','+sy+' C'+mx+','+sy+' '+mx+','+ty+' '+tx+','+ty+'" fill="none" stroke="'+ec+'" stroke-width="1.5"/>';
+    }
+  });
+
+  ids.forEach(function(id){
+    var p=positions[id],n=nodeMap[id];if(!n)return;
+    var lb=(n.data&&n.data.label)||id,tp=(n.data&&n.data.type)||"leaf";
+    var w=mW(lb,12),clr=tp==="root"?ROOT_CLR:COLORS[p.d%COLORS.length];
+    var isSelected=selectedId===id;
+    var rx=currentLayout==="radial"?p.x-w/2:p.x,ry=p.y-NH/2;
+    var nf=darkMode?"rgba(25,25,30,0.8)":"rgba(255,255,255,0.95)";
+    var tf=darkMode?"#ddd":"#222";
+    s+='<g class="nd" data-id="'+id+'" style="cursor:pointer">';
+    if(isSelected)s+='<rect x="'+(rx-3)+'" y="'+(ry-3)+'" width="'+(w+6)+'" height="'+(NH+6)+'" rx="10" fill="none" stroke="'+clr+'" stroke-width="1" opacity="0.3"/>';
+    s+='<rect x="'+rx+'" y="'+ry+'" width="'+w+'" height="'+NH+'" rx="8" fill="'+nf+'" stroke="'+clr+'" stroke-width="'+(tp==="root"?2.5:isSelected?2:1.5)+'"/>';
+    s+='<text x="'+(rx+w/2)+'" y="'+(p.y+1)+'" text-anchor="middle" dominant-baseline="middle" font-size="'+(tp==="root"?13:11)+'" font-weight="'+(tp==="root"?"600":"400")+'" fill="'+tf+'">'+esc(lb)+'</text>';
+    if((adjList[id]||[]).length>0){
+      var ix=rx+w-2,iy=ry-2;
+      var cif=darkMode?"rgba(25,25,30,0.9)":"rgba(255,255,255,0.95)";
+      var cit=darkMode?"#ccc":"#444";
+      var isC=collapsed[id];
+      s+='<circle cx="'+ix+'" cy="'+iy+'" r="7" fill="'+cif+'" stroke="'+clr+'" stroke-width="1"/>';
+      s+='<text x="'+ix+'" y="'+(iy+1)+'" text-anchor="middle" dominant-baseline="middle" font-size="9" fill="'+cit+'">'+(isC?"+":"\\u2212")+'</text>';
+    }
+    s+='</g>';
+  });
+
+  s+='</g></svg>';
+  return s;
 }
 
 // ========== INIT ==========
@@ -369,7 +489,7 @@ function initDiagram(data){
 
 // ========== EVENT BINDINGS ==========
 var canvasEl=document.getElementById("canvas");
-canvasEl.addEventListener("mousedown",function(ev){if(ev.target===canvasEl||ev.target.tagName==="svg"||ev.target.tagName==="SVG"){isDragging=true;dragStartX=ev.clientX;dragStartY=ev.clientY;dragPanX=panX;dragPanY=panY;}});
+canvasEl.addEventListener("mousedown",function(ev){if(!nodeDragId&&(ev.target===canvasEl||ev.target.tagName==="svg"||ev.target.tagName==="SVG")){isDragging=true;dragStartX=ev.clientX;dragStartY=ev.clientY;dragPanX=panX;dragPanY=panY;}});
 window.addEventListener("mousemove",function(ev){if(isDragging){panX=dragPanX+(ev.clientX-dragStartX);panY=dragPanY+(ev.clientY-dragStartY);applyTransform();}});
 window.addEventListener("mouseup",function(){isDragging=false;});
 canvasEl.addEventListener("wheel",function(ev){ev.preventDefault();var r=canvasEl.getBoundingClientRect();zoomBy(ev.deltaY>0?-0.1:0.1,ev.clientX-r.left,ev.clientY-r.top);},{passive:false});
@@ -380,6 +500,12 @@ document.getElementById("z-out").onclick=function(){var r=canvasEl.getBoundingCl
 document.getElementById("z-fit").onclick=function(){fitView();setTimeout(reportSize,100);};
 document.getElementById("z-linear").onclick=function(){currentLayout="linear";redraw();setTimeout(function(){fitView();reportSize();},50);};
 document.getElementById("z-radial").onclick=function(){currentLayout="radial";redraw();setTimeout(function(){fitView();reportSize();},50);};
+document.getElementById("z-reset").onclick=function(){customPos={};redraw();setTimeout(function(){fitView();reportSize();},50);};
+document.getElementById("btn-theme").onclick=function(){
+  darkMode=!darkMode;
+  document.documentElement.setAttribute("data-theme",darkMode?"dark":"light");
+  redraw();
+};
 document.getElementById("btn-open").onclick=function(){if(diagramLink)sendReq("ui/open-link",{url:diagramLink});};
 document.getElementById("btn-fs").onclick=function(){sendReq("ui/request-display-mode",{mode:"fullscreen"});};
 document.getElementById("det-close").onclick=hideDetails;
