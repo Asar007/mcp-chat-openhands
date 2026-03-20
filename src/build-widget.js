@@ -84,6 +84,10 @@ html[data-theme="light"] .spin{border-color:#e5e5e5;border-top-color:#10a37f}
       <button id="z-linear" title="Linear layout">☰ Linear</button>
       <button id="z-radial" title="Radial layout">◎ Radial</button>
       <div class="sep"></div>
+      <button id="z-cup" title="Collapse one level">▲ Collapse</button>
+      <button id="z-cdn" title="Expand one level">▼ Expand</button>
+      <div class="sep"></div>
+      <button id="z-lock" title="Lock/unlock node dragging">🔓 Unlocked</button>
       <button id="z-reset" title="Reset node positions">↺ Reset</button>
     </div>
     <div class="g">
@@ -120,6 +124,7 @@ var collapsed={},currentLayout="linear",diagramLink="",selectedId=null;
 var scale=1,panX=0,panY=0,isDragging=false,dragStartX=0,dragStartY=0,dragPanX=0,dragPanY=0;
 var nodeDragId=null,nodeDragStartX=0,nodeDragStartY=0,nodeDragOrigX=0,nodeDragOrigY=0;
 var darkMode=true;
+var locked=false;
 // Custom position overrides (set by dragging)
 var customPos={};
 
@@ -187,6 +192,63 @@ function calcLayout(){
       positions[id].y=customPos[id].y;
     }
   });
+}
+
+// ========== DRILL UP/DOWN (Collapse/Expand by Level) ==========
+function calcLevels(){
+  var levels={};
+  function walk(id,d){levels[id]=d;(adjList[id]||[]).forEach(function(c){walk(c,d+1);});}
+  var root=findRoot();if(root)walk(root.id,0);
+  return levels;
+}
+
+function isHiddenByAncestor(id){
+  var cur=id;
+  while(parentMap[cur]){
+    if(collapsed[parentMap[cur]])return true;
+    cur=parentMap[cur];
+  }
+  return false;
+}
+
+function drillUp(){
+  var levels=calcLevels();
+  // Find max visible level
+  var maxLvl=0;
+  Object.keys(levels).forEach(function(id){
+    if(!isHiddenByAncestor(id)&&levels[id]>maxLvl)maxLvl=levels[id];
+  });
+  if(maxLvl<=0)return;
+  var target=maxLvl-1;
+  // Collapse all nodes at target level that have children
+  Object.keys(levels).forEach(function(id){
+    if(levels[id]===target&&(adjList[id]||[]).length>0){
+      collapsed[id]=true;
+    }
+  });
+  customPos={};
+  redraw();fitView();setTimeout(reportSize,100);
+}
+
+function drillDown(){
+  var levels=calcLevels();
+  // Find lowest collapsed level that is visible
+  var minCollapsed=Infinity;
+  Object.keys(collapsed).forEach(function(id){
+    if(collapsed[id]&&!isHiddenByAncestor(id)){
+      var lvl=levels[id]||0;
+      if(lvl<minCollapsed)minCollapsed=lvl;
+    }
+  });
+  if(minCollapsed===Infinity)return;
+  // Expand all collapsed nodes at that level
+  Object.keys(collapsed).forEach(function(id){
+    if(collapsed[id]&&(levels[id]||0)===minCollapsed){
+      collapsed[id]=false;
+    }
+  });
+  customPos={};
+  redraw();fitView();setTimeout(reportSize,100);
 }
 
 // ========== RENDER SVG ==========
@@ -351,8 +413,9 @@ function bindNodeEvents(){
   document.querySelectorAll(".nd").forEach(function(el){
     var id=el.getAttribute("data-id");
 
-    // Drag start
+    // Drag start (only if not locked)
     el.addEventListener("mousedown",function(ev){
+      if(locked)return;
       ev.stopPropagation();
       nodeDragId=id;
       nodeWasDragged=false;
@@ -514,6 +577,13 @@ document.getElementById("z-out").onclick=function(){var r=canvasEl.getBoundingCl
 document.getElementById("z-fit").onclick=function(){fitView();setTimeout(reportSize,100);};
 document.getElementById("z-linear").onclick=function(){currentLayout="linear";redraw();setTimeout(function(){fitView();reportSize();},50);};
 document.getElementById("z-radial").onclick=function(){currentLayout="radial";redraw();setTimeout(function(){fitView();reportSize();},50);};
+document.getElementById("z-cup").onclick=drillUp;
+document.getElementById("z-cdn").onclick=drillDown;
+document.getElementById("z-lock").onclick=function(){
+  locked=!locked;
+  var btn=document.getElementById("z-lock");
+  btn.textContent=locked?"🔒 Locked":"🔓 Unlocked";
+};
 document.getElementById("z-reset").onclick=function(){customPos={};redraw();setTimeout(function(){fitView();reportSize();},50);};
 document.getElementById("btn-theme").onclick=function(){
   darkMode=!darkMode;
