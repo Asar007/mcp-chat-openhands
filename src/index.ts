@@ -53,7 +53,7 @@ function createServer(): McpServer {
     {
       title: "Create Public Diagram",
       description:
-        "Create and display an interactive mind map diagram. Pass the diagram JSON content (with metadata, nodes, edges, hierarchy). Each node must have id and data with label, type (root/category/leaf), summary, and hoverSummary. The tool renders the mind map inline and publishes it to a shareable link. IMPORTANT: Use visualize_chat first to get the correct JSON schema, then pass the generated JSON here. CRITICAL: The response includes a public_id — if the user asks to modify the diagram, you MUST use update_public_diagram with that public_id instead of creating a new one.",
+        "Create a NEW mind map diagram. ONLY use this for the FIRST diagram in a conversation. Pass diagram JSON (metadata, nodes, edges, hierarchy). Each node needs id + data with label, type (root/category/leaf), summary, hoverSummary. Use visualize_chat first for the schema. The response contains a public_id — you MUST remember it. For ANY subsequent changes (add nodes, remove nodes, rename, restructure), ALWAYS use update_public_diagram with that public_id. NEVER call create_public_diagram twice in the same conversation.",
       inputSchema: {
         json_content: z
           .union([z.string(), z.record(z.string(), z.any())])
@@ -92,14 +92,17 @@ function createServer(): McpServer {
         // Publishing failed, still return the JSON for widget rendering
       }
 
-      // Return the diagram JSON as text — the widget renders it directly
-      // (same pattern as draw.io returning XML)
+      // Return the diagram JSON for widget rendering + metadata for the LLM
       const result = { ...parsedContent, _link: link, _public_id: public_id };
       return {
         content: [
           {
             type: "text" as const,
             text: JSON.stringify(result),
+          },
+          {
+            type: "text" as const,
+            text: `DIAGRAM CREATED. public_id="${public_id}" link="${link}". IMPORTANT: For any modifications to this diagram, use update_public_diagram with public_id="${public_id}". Do NOT create a new diagram.`,
           },
         ],
       };
@@ -112,7 +115,7 @@ function createServer(): McpServer {
     {
       title: "Update Public Diagram",
       description:
-        "Update an existing public diagram at the SAME shareable link. ALWAYS use this instead of create_public_diagram when the user wants to modify, add to, remove from, or change an existing diagram. Requires the public_id from the original create_public_diagram response. The URL stays the same and the TTL is extended. Use visualize_chat with the modification request to regenerate the full JSON, then pass it here with the original public_id.",
+        "Update an EXISTING diagram. Use this for ANY change to a previously created diagram: adding nodes, removing nodes, renaming, restructuring, expanding branches — any modification at all. Requires the public_id from the previous create_public_diagram call. The shareable URL stays the same. You must pass the COMPLETE updated JSON (not just the diff). To modify: take the original JSON, apply the user's requested changes, then pass the full updated JSON here with the same public_id.",
       inputSchema: {
         public_id: z
           .string()
