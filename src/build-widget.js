@@ -593,16 +593,30 @@ document.getElementById("btn-theme").onclick=function(){
 };
 document.getElementById("btn-open").onclick=function(){if(diagramLink)sendReq("ui/open-link",{url:diagramLink});};
 var isFullscreen=false;
+
+function applyFullscreenLayout(){
+  document.getElementById("wrap").style.height="100vh";
+  document.getElementById("canvas").style.height="calc(100vh - 36px)";
+  // Need multiple delayed fitView calls because the host takes time to resize the iframe
+  setTimeout(fitView,100);
+  setTimeout(fitView,300);
+  setTimeout(fitView,600);
+}
+
+function applyInlineLayout(){
+  reportSize();
+  setTimeout(fitView,100);
+}
+
 document.getElementById("btn-fs").onclick=function(){
   isFullscreen=!isFullscreen;
   sendReq("ui/request-display-mode",{mode:isFullscreen?"fullscreen":"inline"});
   document.getElementById("btn-fs").textContent=isFullscreen?"⊡":"⛶";
-  // Also try resizing to fill
   if(isFullscreen){
-    document.getElementById("wrap").style.height="100vh";
-    document.getElementById("canvas").style.height="calc(100vh - 36px)";
+    applyFullscreenLayout();
+  }else{
+    applyInlineLayout();
   }
-  setTimeout(function(){fitView();reportSize();},100);
 };
 document.getElementById("det-close").onclick=hideDetails;
 
@@ -640,15 +654,15 @@ window.addEventListener("message",function(ev){
       isFullscreen=ctx.displayMode==="fullscreen";
       document.getElementById("btn-fs").textContent=isFullscreen?"⊡":"⛶";
       if(isFullscreen){
-        document.getElementById("wrap").style.height="100vh";
-        document.getElementById("canvas").style.height="calc(100vh - 36px)";
+        applyFullscreenLayout();
       }else{
-        reportSize();
+        applyInlineLayout();
       }
-      setTimeout(function(){fitView();},100);
     }
     if(ctx.containerDimensions){
-      setTimeout(function(){fitView();},100);
+      // Host resized our container — re-fit
+      setTimeout(fitView,50);
+      setTimeout(fitView,200);
     }
     return;
   }
