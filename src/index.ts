@@ -12,12 +12,14 @@ import {
 } from "@modelcontextprotocol/ext-apps/server";
 import * as z from "zod/v4";
 import { buildMindMapPrompt } from "./prompt.js";
+import * as storage from "./storage.js";
 
 const API_BASE_URL =
   process.env.API_BASE_URL || "https://api.navigatechat.com";
 
 const DIST_DIR = path.join(import.meta.dirname, ".");
 const DIAGRAM_RESOURCE_URI = "ui://chat-visualizer/diagram.html";
+const WHITEBOARD_RESOURCE_URI = "ui://chat-visualizer/whiteboard.html";
 
 function createServer(): McpServer {
   const server = new McpServer({
@@ -227,6 +229,223 @@ function createServer(): McpServer {
     }
   );
 
+  // Whiteboard tools
+  server.registerTool(
+    "create_whiteboard",
+    {
+      title: "Create Whiteboard",
+      description: "Create a new whiteboard with an infinite canvas. Whiteboards can hold multiple diagrams (images, mind maps, draw.io diagrams) that can be arranged and positioned on the canvas.",
+      inputSchema: z.object({
+        name: z.string().describe("The name/title for the whiteboard"),
+      }),
+    },
+    async ({ name }) => {
+      const whiteboard = await storage.createWhiteboard(name);
+      const shareableLink = `/whiteboard/${whiteboard.id}`;
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ id: whiteboard.id, name: whiteboard.name, link: shareableLink }),
+          },
+          {
+            type: "text" as const,
+            text: `Whiteboard created: "${whiteboard.name}" (id: ${whiteboard.id}). Use this id to add diagrams and manage the whiteboard.`,
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerTool(
+    "list_whiteboards",
+    {
+      title: "List Whiteboards",
+      description: "List all whiteboards with their basic information (id, name, creation date, diagram count).",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const whiteboards = await storage.listWhiteboards();
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(whiteboards, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerTool(
+    "get_whiteboard",
+    {
+      title: "Get Whiteboard",
+      description: "Get the full details of a whiteboard including all diagrams and their positions.",
+      inputSchema: z.object({
+        whiteboardId: z.string().describe("The ID of the whiteboard to retrieve"),
+      }),
+    },
+    async ({ whiteboardId }) => {
+      const whiteboard = await storage.getWhiteboard(whiteboardId);
+      if (!whiteboard) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Whiteboard not found: ${whiteboardId}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(whiteboard),
+          },
+        ],
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "add_diagram_to_whiteboard",
+    {
+      title: "Add Diagram to Whiteboard",
+      description: "Add a diagram (image URL, mind map JSON, or draw.io XML) to an existing whiteboard. The diagram will appear at the specified position on the infinite canvas.",
+      inputSchema: {
+        whiteboardId: z.string().describe("The ID of the whiteboard to add the diagram to"),
+        diagramType: z.enum(["image", "mindmap", "drawio"]).describe("The type of diagram"),
+        content: z.string().describe("The content: URL for images, JSON for mind maps, XML for drawio diagrams"),
+        label: z.string().optional().describe("Optional label for the diagram"),
+        x: z.number().describe("Initial X position on the canvas"),
+        y: z.number().describe("Initial Y position on the canvas"),
+        width: z.number().optional().describe("Width of the diagram (default: 400 for images, 500 for mindmap/drawio)"),
+        height: z.number().optional().describe("Height of the diagram (default: 300 for images, 400 for mindmap/drawio)"),
+      },
+      _meta: {
+        ui: { resourceUri: WHITEBOARD_RESOURCE_URI },
+      },
+    },
+    async ({ whiteboardId, diagramType, content, label, x, y, width, height }) => {
+      const defaultWidth = diagramType === "image" ? 400 : 500;
+      const defaultHeight = diagramType === "image" ? 300 : 400;
+      
+      const diagram = await storage.addDiagram(whiteboardId, {
+        type: diagramType,
+        content,
+        x,
+        y,
+        width: width || defaultWidth,
+        height: height || defaultHeight,
+        label,
+      });
+      
+      if (!diagram) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to add diagram. Whiteboard not found: ${whiteboardId}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      
+      const whiteboard = await storage.getWhiteboard(whiteboardId);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(whiteboard),
+          },
+        ],
+      };
+    }
+  );
+
+  registerAppTool(
+    server,
+    "update_diagram_position",
+    {
+      title: "Update Diagram Position",
+      description: "Update the position and/or size of a diagram on a whiteboard.",
+      inputSchema: {
+        whiteboardId: z.string().describe("The ID of the whiteboard"),
+        diagramId: z.string().describe("The ID of the diagram to update"),
+        x: z.number().describe("New X position"),
+        y: z.number().describe("New Y position"),
+        width: z.number().optional().describe("New width"),
+        height: z.number().optional().describe("New height"),
+      },
+      _meta: {
+        ui: { resourceUri: WHITEBOARD_RESOURCE_URI },
+      },
+    },
+    async ({ whiteboardId, diagramId, x, y, width, height }) => {
+      const diagram = await storage.updateDiagramPosition(whiteboardId, diagramId, x, y, width, height);
+      
+      if (!diagram) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to update diagram. Whiteboard or diagram not found.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      
+      const whiteboard = await storage.getWhiteboard(whiteboardId);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(whiteboard),
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerTool(
+    "delete_whiteboard",
+    {
+      title: "Delete Whiteboard",
+      description: "Delete a whiteboard and all its diagrams.",
+      inputSchema: z.object({
+        whiteboardId: z.string().describe("The ID of the whiteboard to delete"),
+      }),
+    },
+    async ({ whiteboardId }) => {
+      const deleted = await storage.deleteWhiteboard(whiteboardId);
+      if (!deleted) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Whiteboard not found: ${whiteboardId}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Whiteboard deleted: ${whiteboardId}`,
+          },
+        ],
+      };
+    }
+  );
+
   registerAppResource(
     server,
     DIAGRAM_RESOURCE_URI,
@@ -241,6 +460,34 @@ function createServer(): McpServer {
         contents: [
           {
             uri: DIAGRAM_RESOURCE_URI,
+            mimeType: RESOURCE_MIME_TYPE,
+            text: html,
+            _meta: {
+              ui: {
+                prefersBorder: true,
+              },
+            },
+          },
+        ],
+      };
+    }
+  );
+
+  // Whiteboard widget resource
+  registerAppResource(
+    server,
+    WHITEBOARD_RESOURCE_URI,
+    WHITEBOARD_RESOURCE_URI,
+    { mimeType: RESOURCE_MIME_TYPE },
+    async () => {
+      const html = await fs.readFile(
+        path.join(DIST_DIR, "whiteboard-widget.html"),
+        "utf-8"
+      );
+      return {
+        contents: [
+          {
+            uri: WHITEBOARD_RESOURCE_URI,
             mimeType: RESOURCE_MIME_TYPE,
             text: html,
             _meta: {
@@ -353,6 +600,21 @@ const httpServer = http.createServer(async (req, res) => {
   if (req.url === "/health" || req.url === "/") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok", name: "mcp-chat-visualizer" }));
+    return;
+  }
+
+  // Whiteboard page route - returns the whiteboard data for the widget
+  const whiteboardMatch = req.url?.match(/^\/whiteboard\/([\w_]+)$/);
+  if (whiteboardMatch) {
+    const whiteboardId = whiteboardMatch[1];
+    const whiteboard = await storage.getWhiteboard(whiteboardId);
+    if (!whiteboard) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Whiteboard not found" }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(whiteboard));
     return;
   }
 

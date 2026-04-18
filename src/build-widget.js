@@ -676,3 +676,8 @@ sendReq("ui/initialize",{protocolVersion:"2025-03-26",appInfo:{name:"NavigateCha
 if (!fs.existsSync(DIST)) fs.mkdirSync(DIST, { recursive: true });
 fs.writeFileSync(path.join(DIST, "widget.html"), html, "utf-8");
 console.log("Built dist/widget.html (" + Math.round(html.length/1024) + "KB)");
+
+// Build whiteboard widget
+const whiteboardHtml = fs.readFileSync(path.join(ROOT, "whiteboard-widget.html"), "utf-8");
+fs.writeFileSync(path.join(DIST, "whiteboard-widget.html"), whiteboardHtml, "utf-8");
+console.log("Built dist/whiteboard-widget.html (" + Math.round(whiteboardHtml.length/1024) + "KB)");
