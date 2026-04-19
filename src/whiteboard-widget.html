@@ -350,8 +350,15 @@
         } else if (diagram.type === 'mindmap') {
           try {
             const mindmapData = JSON.parse(diagram.content);
-            content.innerHTML = renderMindMap(mindmapData);
-          } catch {
+            // Try simple tree format first, then NavigateChat format
+            if (mindmapData.root) {
+              content.innerHTML = renderSimpleMindMap(mindmapData);
+            } else if (mindmapData.nodes) {
+              content.innerHTML = renderNavigateChatMindMap(mindmapData);
+            } else {
+              content.innerHTML = '<div style="color:#888">Unknown mind map format</div>';
+            }
+          } catch (e) {
             content.innerHTML = '<div style="color:#888">Invalid mind map data</div>';
           }
         } else if (diagram.type === 'drawio') {
@@ -375,8 +382,69 @@
       updateMinimap();
     }
 
-    // Render mini mind map (simplified for preview)
-    function renderMindMap(data) {
+    // Render mini mind map (simplified tree format: {root: {text, children: [{text, children: []}]}})
+    function renderSimpleMindMap(data) {
+      if (!data.root) return '<div style="color:#888">No root node</div>';
+      
+      const svgNS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(svgNS, "svg");
+      svg.setAttribute("viewBox", "0 0 400 300");
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
+      
+      const renderNode = (node, x, y, level) => {
+        if (!node) return;
+        
+        const colors = ['#10a37f', '#f97316', '#22c55e', '#8b5cf6'];
+        const color = colors[level % colors.length];
+        
+        // Draw node circle
+        const circle = document.createElementNS(svgNS, "circle");
+        circle.setAttribute("cx", x);
+        circle.setAttribute("cy", y);
+        circle.setAttribute("r", 25);
+        circle.setAttribute("fill", color);
+        svg.appendChild(circle);
+        
+        // Draw text
+        const text = document.createElementNS(svgNS, "text");
+        text.setAttribute("x", x);
+        text.setAttribute("y", y + 5);
+        text.setAttribute("text-anchor", "middle");
+        text.setAttribute("fill", "white");
+        text.setAttribute("font-size", "10");
+        text.textContent = (node.text || '').substring(0, 8);
+        svg.appendChild(text);
+        
+        // Render children
+        if (node.children && node.children.length > 0) {
+          const childCount = node.children.length;
+          const spacing = 80 / Math.max(childCount, 1);
+          node.children.forEach((child, i) => {
+            const childX = x + 80;
+            const childY = y - 40 + (i * spacing);
+            
+            // Draw edge
+            const line = document.createElementNS(svgNS, "line");
+            line.setAttribute("x1", x + 20);
+            line.setAttribute("y1", y);
+            line.setAttribute("x2", childX - 25);
+            line.setAttribute("y2", childY);
+            line.setAttribute("stroke", "#555");
+            line.setAttribute("stroke-width", "2");
+            svg.appendChild(line);
+            
+            renderNode(child, childX, childY, level + 1);
+          });
+        }
+      };
+      
+      renderNode(data.root, 50, 150, 0);
+      return svg.outerHTML;
+    }
+
+    // Render mini mind map (NavigateChat format: {nodes, edges})
+    function renderNavigateChatMindMap(data) {
       if (!data.nodes || !data.edges) return '<div style="color:#888">No mind map data</div>';
       
       const nodeMap = {};
