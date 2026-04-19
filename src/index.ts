@@ -632,8 +632,8 @@ const httpServer = http.createServer(async (req, res) => {
       
       // Embed the whiteboard data
       html = html.replace(
-        "const whiteboardData = null;",
-        `const whiteboardData = ${JSON.stringify(whiteboard)};`
+        "whiteboardData = null;",
+        `whiteboardData = ${JSON.stringify(whiteboard)};`
       );
       
       res.writeHead(200, { "Content-Type": "text/html" });
