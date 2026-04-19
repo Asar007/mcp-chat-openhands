@@ -624,8 +624,25 @@ const httpServer = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ error: "Whiteboard not found" }));
       return;
     }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(whiteboard));
+    
+    // Try to serve the widget HTML file, otherwise return JSON
+    try {
+      const widgetPath = path.join(DIST_DIR, "whiteboard-widget.html");
+      let html = await fs.readFile(widgetPath, "utf-8");
+      
+      // Embed the whiteboard data
+      html = html.replace(
+        "const whiteboardData = null;",
+        `const whiteboardData = ${JSON.stringify(whiteboard)};`
+      );
+      
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(html);
+    } catch {
+      // Fall back to JSON if file not found
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(whiteboard));
+    }
     return;
   }
 
